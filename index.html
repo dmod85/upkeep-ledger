@@ -1,0 +1,1022 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Upkeep Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=JetBrains+Mono:wght@500&family=Public+Sans:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+img{max-width:100%}
+/* Layout: a single-column workshop ledger. Status gauges up top, then the due list sorted by urgency; details open in a sheet. */
+:root{
+  --bg:#eef1f4; --surface:#ffffff; --surface-2:#e6eaef; --ink:#15202b; --ink-2:#4b5967; --line:#d2d9e0;
+  --accent:#1c5b89; --accent-ink:#ffffff; --accent-soft:#dbe8f3;
+  --over:#b42318; --over-bg:#fde7e4; --soon:#9a5b00; --soon-bg:#fff1d6; --ok:#2b7a4b; --ok-bg:#e2f2e8; --none:#5f6b78; --none-bg:#e7ebef;
+  --shadow:0 1px 2px rgba(21,32,43,.06),0 4px 16px rgba(21,32,43,.06);
+  --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e141a; --surface:#16202a; --surface-2:#1e2a36; --ink:#e5ecf2; --ink-2:#9db0c1; --line:#2b3948;
+  --accent:#6cb0e3; --accent-ink:#0a1621; --accent-soft:#1b3349;
+  --over:#ff8f84; --over-bg:#3b1a18; --soon:#f0b552; --soon-bg:#382a10; --ok:#72d39c; --ok-bg:#132f20; --none:#93a2b1; --none-bg:#222e3a;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25); color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0e141a; --surface:#16202a; --surface-2:#1e2a36; --ink:#e5ecf2; --ink-2:#9db0c1; --line:#2b3948;
+  --accent:#6cb0e3; --accent-ink:#0a1621; --accent-soft:#1b3349;
+  --over:#ff8f84; --over-bg:#3b1a18; --soon:#f0b552; --soon-bg:#382a10; --ok:#72d39c; --ok-bg:#132f20; --none:#93a2b1; --none-bg:#222e3a;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25); color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5}
+.wrap{max-width:980px;margin:0 auto;padding-inline:16px;padding-block:24px 64px;display:flex;flex-direction:column;gap:20px}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px}
+.brand{min-width:0;flex:1 1 320px}
+.brand h1{font-family:var(--f-display);font-weight:700;font-size:40px;line-height:1;letter-spacing:.02em;text-transform:uppercase;margin:0;text-wrap:balance}
+.brand h1 span{color:var(--accent)}
+.sub{margin:6px 0 0;color:var(--ink-2);max-width:60ch}
+
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.small{padding:6px 11px;font-size:14px}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--accent);padding-inline:8px}
+.btn.ghost:hover{border-color:var(--line)}
+.btn.danger{color:var(--over)}
+.btn.danger.armed{background:var(--over);color:var(--surface);border-color:var(--over)}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+
+.top-actions{display:flex;flex-wrap:wrap;gap:8px}
+.inline{display:flex;gap:8px;align-items:center}
+.inline input{flex:1;min-width:0}
+.hrow.member{grid-template-columns:minmax(0,1fr) auto auto;align-items:center}
+.add-card{border-style:dashed;box-shadow:none;cursor:pointer;align-items:center;justify-content:center;min-height:150px;color:var(--accent);font-weight:600;font:inherit;font-weight:600}
+input[type=email]{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:0;max-width:100%;width:100%}
+
+.gauges{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.gauge{all:unset;box-sizing:border-box;cursor:pointer;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;position:relative;overflow:hidden}
+.gauge::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--c)}
+.gauge .n{font-family:var(--f-display);font-weight:700;font-size:34px;line-height:1;font-variant-numeric:tabular-nums;color:var(--c)}
+.gauge .t{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-2)}
+.gauge[aria-pressed="true"]{background:var(--cbg);border-color:var(--c)}
+.gauge:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.g-over{--c:var(--over);--cbg:var(--over-bg)} .g-soon{--c:var(--soon);--cbg:var(--soon-bg)} .g-none{--c:var(--none);--cbg:var(--none-bg)} .g-ok{--c:var(--ok);--cbg:var(--ok-bg)}
+
+.bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line)}
+.tabs{display:flex;gap:4px}
+.tab{all:unset;cursor:pointer;padding:10px 12px;font-family:var(--f-display);font-weight:600;font-size:19px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2);border-bottom:3px solid transparent;margin-bottom:-1px}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.tab:focus-visible{outline:2px solid var(--accent)}
+.filter{display:flex;align-items:center;gap:8px;padding-bottom:8px;font-size:14px;color:var(--ink-2)}
+select,input[type=text],input[type=number],input[type=date],textarea{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:0;max-width:100%}
+textarea{resize:vertical;min-height:64px;width:100%}
+
+.group{display:flex;flex-direction:column;gap:8px}
+.group h2{font-family:var(--f-display);font-weight:700;font-size:20px;letter-spacing:.05em;text-transform:uppercase;margin:8px 0 0;display:flex;align-items:center;gap:8px;color:var(--ink-2)}
+.group h2 .count{font-family:var(--f-mono);font-size:13px;background:var(--surface-2);border-radius:6px;padding:1px 7px;color:var(--ink-2)}
+.list{display:flex;flex-direction:column;gap:8px}
+.row{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px 12px 18px;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.2fr) minmax(0,1.2fr) auto;gap:6px 16px;align-items:center;position:relative;cursor:pointer}
+.row::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:4px;border-radius:0 3px 3px 0;background:var(--c)}
+.row:hover{border-color:var(--c)}
+.s-over{--c:var(--over);--cbg:var(--over-bg)} .s-soon{--c:var(--soon);--cbg:var(--soon-bg)} .s-none{--c:var(--none);--cbg:var(--none-bg)} .s-ok{--c:var(--ok);--cbg:var(--ok-bg)}
+.r-title{font-weight:600;line-height:1.3}
+.r-asset{font-size:13px;color:var(--ink-2)}
+.lbl{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-2)}
+.cell{font-size:14px;min-width:0}
+.pill{display:inline-block;font-size:12px;font-weight:600;border-radius:999px;padding:1px 8px;background:var(--cbg);color:var(--c);margin-top:2px;white-space:nowrap}
+.odo{font-family:var(--f-mono);font-size:12.5px;background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:0 5px;letter-spacing:.04em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.muted{color:var(--ink-2)}
+
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:12px;padding:28px 22px;display:flex;flex-direction:column;gap:14px}
+.empty h2{font-family:var(--f-display);font-size:26px;text-transform:uppercase;letter-spacing:.03em;margin:0}
+.empty p{margin:0;color:var(--ink-2);max-width:60ch}
+.quick{display:flex;flex-wrap:wrap;gap:8px}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--shadow)}
+.card-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.card h3{margin:0;font-size:17px;line-height:1.25}
+.kind{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--accent);background:var(--accent-soft);border-radius:4px;padding:2px 6px;white-space:nowrap}
+.dots{display:flex;flex-wrap:wrap;gap:6px;font-size:13px}
+.dots span{display:inline-flex;align-items:center;gap:5px}
+.dots i{width:8px;height:8px;border-radius:50%;background:var(--c);display:inline-block}
+.card-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto}
+.meter-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px}
+
+.hist{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.hrow{display:grid;grid-template-columns:110px minmax(0,1fr) auto;gap:4px 14px;padding:10px 14px;border-top:1px solid var(--line);align-items:start}
+.hrow:first-child{border-top:0}
+.hdate{font-family:var(--f-mono);font-size:13px;color:var(--ink-2);padding-top:2px;font-variant-numeric:tabular-nums}
+.hnote{font-size:14px;color:var(--ink-2);margin-top:2px;overflow-wrap:anywhere}
+
+.scrim{position:fixed;inset:0;background:rgba(10,16,22,.5);display:flex;align-items:flex-end;justify-content:center;z-index:20;padding:12px}
+@media (min-width:700px){.scrim{align-items:center}}
+.sheet{background:var(--surface);color:var(--ink);border-radius:14px;width:100%;max-width:620px;max-height:calc(100% - 24px);overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35);display:flex;flex-direction:column}
+.sheet-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:18px 20px 8px;position:sticky;top:0;background:var(--surface);z-index:1}
+.sheet-head h2{margin:0;font-family:var(--f-display);font-size:26px;letter-spacing:.02em;text-transform:uppercase;line-height:1.05;text-wrap:balance}
+.sheet-head .kicker{font-size:13px;color:var(--ink-2);margin-top:4px}
+.sheet-body{padding:8px 20px 20px;display:flex;flex-direction:column;gap:14px}
+.sheet-foot{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:12px 20px 18px;border-top:1px solid var(--line);position:sticky;bottom:0;background:var(--surface)}
+.x{all:unset;cursor:pointer;font-size:22px;line-height:1;padding:4px 8px;border-radius:6px;color:var(--ink-2)}
+.x:hover{background:var(--surface-2)}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field label,.field .flabel{font-size:13px;font-weight:600;color:var(--ink-2)}
+.field input,.field select{width:100%}
+.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.hint{font-size:13px;color:var(--ink-2);margin:0}
+.presets{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.preset{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:2px 10px;padding:9px 12px;border-top:1px solid var(--line);align-items:start;cursor:pointer}
+.preset:first-child{border-top:0}
+.preset:hover{background:var(--surface-2)}
+.preset input{margin-top:4px;accent-color:var(--accent);width:16px;height:16px}
+.preset .pname{font-weight:500;font-size:14.5px}
+.preset .ptip{grid-column:2/4;font-size:12.5px;color:var(--ink-2)}
+.preset .pint{font-size:12.5px;color:var(--ink-2);white-space:nowrap;text-align:right}
+.preset-tools{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.fact{background:var(--surface-2);border-radius:8px;padding:10px 12px;font-size:14px;min-width:0}
+.fact.status{background:var(--cbg)}
+.fact.status strong{color:var(--c)}
+.sec-title{font-family:var(--f-display);font-size:18px;text-transform:uppercase;letter-spacing:.05em;margin:4px 0 0;color:var(--ink-2)}
+
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:600;z-index:30;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
+
+@media (max-width:760px){
+  .row{grid-template-columns:minmax(0,1fr) auto}
+  .row .cell{grid-column:1/2}
+  .row .r-btn{grid-column:2;grid-row:1}
+  .gauges{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:480px){
+  .fields,.facts{grid-template-columns:minmax(0,1fr)}
+  .hrow{grid-template-columns:minmax(0,1fr) auto}
+  .hdate{grid-column:1/3}
+  .brand h1{font-size:34px}
+}
+@media (prefers-reduced-motion:no-preference){
+  .sheet{animation:rise .18s ease-out}
+  @keyframes rise{from{transform:translateY(12px);opacity:.6}to{transform:none;opacity:1}}
+}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>Upkeep <span>Ledger</span></h1>
+      <p class="sub">Oil changes, filters, alarms and everything else the house, the cars and the gear need. Log it once and the whole family sees it.</p>
+    </div>
+    <div class="top-actions"><button id="householdBtn" class="btn" type="button" hidden>Household</button><button id="addThingBtn" class="btn primary" type="button" hidden>+ Add a thing</button></div>
+  </header>
+
+  
+  <section class="gauges" id="gauges" hidden aria-label="Status summary">
+    <button class="gauge g-over" data-f="over" type="button" aria-pressed="false"><span class="n" id="n-over">0</span><span class="t">Overdue</span></button>
+    <button class="gauge g-soon" data-f="soon" type="button" aria-pressed="false"><span class="n" id="n-soon">0</span><span class="t">Due soon</span></button>
+    <button class="gauge g-none" data-f="none" type="button" aria-pressed="false"><span class="n" id="n-none">0</span><span class="t">Never logged</span></button>
+    <button class="gauge g-ok" data-f="ok" type="button" aria-pressed="false"><span class="n" id="n-ok">0</span><span class="t">Up to date</span></button>
+  </section>
+
+  <div class="bar" hidden>
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" data-v="due" aria-selected="true" type="button">Due list</button>
+      <button class="tab" role="tab" data-v="things" aria-selected="false" type="button">Things</button>
+      <button class="tab" role="tab" data-v="history" aria-selected="false" type="button">History</button>
+    </nav>
+    <div class="filter">
+      <label for="assetFilter">Show</label>
+      <select id="assetFilter"><option value="all">Everything</option></select>
+    </div>
+  </div>
+
+  <main id="view">
+    <div class="empty"><h2>Loading the ledger</h2><p>Your family's maintenance records will appear here in a moment.</p></div>
+  </main>
+</div>
+
+<div id="modal" class="scrim" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="config.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script>
+/* ---------- Task library ----------
+   Intervals are common manufacturer and industry guidance; every one can be edited per task.
+   Preset rows: [name, everyDays, everyMeter, checkedByDefault, tip] */
+const KINDS = {
+  home: { label: "Home", unit: "", presets: [
+    ["Replace furnace / HVAC filter", 90, 0, 1, "Every 1 to 3 months; monthly with pets or allergies."],
+    ["Test smoke and CO alarms", 30, 0, 1, "Press the test button on every alarm."],
+    ["Replace smoke and CO alarm batteries", 365, 0, 1, "Many families do this when the clocks change."],
+    ["Replace smoke alarms (whole unit)", 3650, 0, 0, "Smoke alarms expire after 10 years, CO alarms after 5 to 7."],
+    ["Service furnace (professional tune-up)", 365, 0, 1, "Schedule in the fall, before heating season."],
+    ["Service A/C (professional tune-up)", 365, 0, 1, "Schedule in the spring, before cooling season."],
+    ["Flush A/C condensate drain line", 90, 0, 0, "A cup of vinegar down the line prevents clogs and leaks."],
+    ["Flush water heater", 365, 0, 1, "Drains sediment and extends tank life."],
+    ["Test water heater relief valve", 365, 0, 0, "Lift the lever briefly; water should flow then stop."],
+    ["Check water heater anode rod", 1095, 0, 0, "Replace when worn to the core wire."],
+    ["Clean dryer vent duct", 365, 0, 1, "Lint buildup is a leading cause of house fires."],
+    ["Replace refrigerator water filter", 180, 0, 1, ""],
+    ["Clean refrigerator condenser coils", 365, 0, 0, ""],
+    ["Clean gutters and downspouts", 180, 0, 1, "Spring and late fall, after the leaves drop."],
+    ["Test sump pump", 90, 0, 0, "Pour water in the pit and confirm it kicks on."],
+    ["Test GFCI outlets", 90, 0, 0, "Press Test, then Reset."],
+    ["Inspect fire extinguishers", 30, 0, 0, "Gauge in the green, pin and seal intact."],
+    ["Clean range hood filter", 90, 0, 0, ""],
+    ["Clean dishwasher filter", 30, 0, 0, ""],
+    ["Run washing machine cleaning cycle", 30, 0, 0, ""],
+    ["Refill water softener salt", 60, 0, 0, ""],
+    ["Replace whole-house water filter", 180, 0, 0, ""],
+    ["Replace humidifier pad", 365, 0, 0, "Swap before heating season."],
+    ["Chimney sweep and inspection", 365, 0, 0, ""],
+    ["Pump septic tank", 1095, 0, 0, "Every 3 to 5 years depending on household size."],
+    ["Inspect roof and flashing", 365, 0, 0, ""],
+    ["Lubricate garage door rollers and springs", 180, 0, 0, ""],
+    ["Test garage door auto-reverse", 30, 0, 0, "Place a board under the door; it should reverse on contact."],
+    ["Winterize outdoor faucets and sprinklers", 365, 0, 0, "Before the first hard freeze."],
+    ["Re-caulk tubs, sinks and windows", 365, 0, 0, ""],
+    ["Seal deck or fence", 730, 0, 0, ""],
+    ["Pest control treatment", 90, 0, 0, ""],
+    ["Test for radon", 730, 0, 0, ""],
+    ["Reverse ceiling fan direction", 180, 0, 0, "Counter-clockwise in summer, clockwise in winter."]
+  ]},
+  vehicle: { label: "Vehicle", unit: "mi", presets: [
+    ["Oil and filter change", 180, 5000, 1, "Check the owner's manual; many synthetic oils go 7,500 to 10,000 mi."],
+    ["Rotate tires", 180, 6000, 1, ""],
+    ["Check tire pressure and tread", 30, 0, 1, "Use the pressure on the driver's door sticker, not the tire."],
+    ["Replace engine air filter", 365, 15000, 1, ""],
+    ["Replace cabin air filter", 365, 15000, 1, ""],
+    ["Replace wiper blades", 365, 0, 1, ""],
+    ["Inspect brakes", 365, 12000, 1, ""],
+    ["Test battery", 365, 0, 1, "Most batteries last 3 to 5 years."],
+    ["Renew registration", 365, 0, 1, ""],
+    ["State inspection / emissions", 365, 0, 0, ""],
+    ["Replace brake fluid", 730, 30000, 0, ""],
+    ["Wheel alignment", 730, 0, 0, "Sooner if the car pulls or tires wear unevenly."],
+    ["Inspect belts and hoses", 365, 0, 0, ""],
+    ["Flush coolant", 1825, 60000, 0, ""],
+    ["Change transmission fluid", 0, 60000, 0, ""],
+    ["Change differential / transfer case fluid", 0, 50000, 0, "AWD and 4x4 vehicles."],
+    ["Replace spark plugs", 0, 100000, 0, ""],
+    ["Replace timing belt", 0, 100000, 0, "Only if the engine has a belt rather than a chain."],
+    ["Wash and wax", 90, 0, 0, ""]
+  ]},
+  generator: { label: "Generator", unit: "hr", presets: [
+    ["Change oil", 365, 100, 1, "Do the first change after 20 to 30 hours of break-in."],
+    ["Clean or replace air filter", 180, 50, 1, ""],
+    ["Replace spark plug", 365, 100, 1, ""],
+    ["Test run under load", 30, 0, 1, "Run 20 to 30 minutes monthly to keep the carburetor clear."],
+    ["Stabilize or drain fuel for storage", 180, 0, 1, "Untreated gas goes stale in about a month."],
+    ["Inspect cords, outlets and transfer switch", 180, 0, 0, ""],
+    ["Clean spark arrestor", 365, 100, 0, ""],
+    ["Dealer service (standby units)", 365, 0, 0, ""],
+    ["Replace starter battery", 1095, 0, 0, "Electric-start and standby units."]
+  ]},
+  yard: { label: "Lawn & yard", unit: "hr", presets: [
+    ["Change mower oil", 365, 50, 1, ""],
+    ["Sharpen mower blade", 365, 25, 1, ""],
+    ["Replace mower air filter", 365, 25, 1, ""],
+    ["Replace spark plug", 365, 100, 1, ""],
+    ["Clean mower deck underside", 30, 0, 0, ""],
+    ["Prep mower for winter storage", 365, 0, 1, "Stabilize fuel and remove the battery."],
+    ["Service snow blower (oil, plug, shear pins)", 365, 0, 0, "Before the first snow."],
+    ["Sharpen chainsaw chain", 90, 0, 0, ""],
+    ["Service string trimmer / leaf blower", 365, 0, 0, ""],
+    ["Winterize irrigation system", 365, 0, 0, "Blow out lines before the first freeze."]
+  ]},
+  boat: { label: "Boat", unit: "hr", presets: [
+    ["Change engine oil and filter", 365, 100, 1, ""],
+    ["Change lower unit gear oil", 365, 100, 1, ""],
+    ["Replace water pump impeller", 1095, 300, 1, ""],
+    ["Replace fuel / water separator filter", 365, 100, 0, ""],
+    ["Inspect and replace anodes", 365, 0, 0, ""],
+    ["Grease trailer wheel bearings", 365, 0, 1, ""],
+    ["Check trailer tires and lights", 90, 0, 0, ""],
+    ["Test bilge pump", 30, 0, 0, ""],
+    ["Check safety gear (life jackets, flares, extinguisher)", 365, 0, 1, "Flares expire 42 months after manufacture."],
+    ["Winterize", 365, 0, 1, ""]
+  ]},
+  pool: { label: "Pool & spa", unit: "", presets: [
+    ["Test water chemistry", 7, 0, 1, ""],
+    ["Empty skimmer and pump baskets", 7, 0, 1, ""],
+    ["Backwash or clean filter", 30, 0, 1, ""],
+    ["Shock the water", 14, 0, 0, ""],
+    ["Replace hot tub filter", 365, 0, 0, ""],
+    ["Drain and refill hot tub", 90, 0, 0, ""],
+    ["Open pool for the season", 365, 0, 0, ""],
+    ["Close pool for the season", 365, 0, 0, ""]
+  ]},
+  rv: { label: "RV / camper", unit: "mi", presets: [
+    ["Inspect roof seals", 180, 0, 1, ""],
+    ["Sanitize fresh water system", 365, 0, 1, ""],
+    ["Winterize plumbing", 365, 0, 1, ""],
+    ["Check tire pressure and age", 30, 0, 1, "Replace RV tires every 5 to 7 years regardless of tread."],
+    ["Test propane and CO detectors", 30, 0, 0, ""],
+    ["Repack wheel bearings", 365, 12000, 0, ""],
+    ["Oil and filter change", 365, 5000, 0, ""],
+    ["Service onboard generator", 365, 0, 0, ""]
+  ]},
+  other: { label: "Something else", unit: "", presets: [] }
+};
+const UNIT_NAMES = { "": "No meter", mi: "Miles", km: "Kilometres", hr: "Engine hours" };
+
+/* ---------- State ---------- */
+const CFG = window.UPKEEP_CONFIG || {};
+const S = {
+  fs: null, auth: null, user: null, uid: null, email: "", phase: "boot",
+  household: null, role: "member", members: [], invites: [],
+  assets: new Map(), tasks: new Map(), logs: new Map(), loaded: false, unsubs: [],
+  view: "due", status: null, asset: "all"
+};
+try { S.asset = localStorage.getItem("ul-asset") || "all"; } catch (e) {}
+const initialHash = (location.hash || "").slice(1);
+if (["due", "things", "history"].includes(initialHash)) S.view = initialHash;
+
+/* ---------- Helpers ---------- */
+const $ = s => document.querySelector(s);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k === "text") el.textContent = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat(Infinity)) {
+    if (k == null || k === false) continue;
+    el.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  }
+  return el;
+}
+const pad = n => String(n).padStart(2, "0");
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const parse = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return ymd(d); };
+const daysBetween = (a, b) => Math.round((parse(b) - parse(a)) / 86400000);
+const today = () => ymd(new Date());
+const fmtDate = s => parse(s).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+const fmtNum = n => Number(n).toLocaleString();
+const odo = (n, unit) => h("span", { class: "odo" }, `${fmtNum(n)} ${unit}`);
+function fmtEvery(days, meter, unit) {
+  const parts = [];
+  if (days) parts.push(days % 365 === 0 ? (days === 365 ? "yearly" : `every ${days / 365} yrs`) : days % 30 === 0 && days >= 60 ? `every ${days / 30} mo` : days === 30 ? "monthly" : days === 7 ? "weekly" : `every ${days} days`);
+  if (meter && unit) parts.push(`${fmtNum(meter)} ${unit}`);
+  return parts.length ? parts.join(" or ") : "no schedule";
+}
+function plural(n, w) { return `${fmtNum(n)} ${w}${n === 1 ? "" : "s"}`; }
+let toastTimer;
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2600);
+}
+function presetMeter(kindKey, meter, unit) {
+  const base = KINDS[kindKey]?.unit;
+  if (!meter || !unit || !base) return 0;
+  if (base === unit) return meter;
+  if (base === "mi" && unit === "km") return Math.round(meter * 1.609 / 500) * 500;
+  return 0;
+}
+
+/* ---------- Firebase data layer ---------- */
+const FV = () => firebase.firestore.FieldValue;
+const defined = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+const hid = () => S.household.id;
+const hhRef = () => S.fs.collection("households").doc(hid());
+const col = table => hhRef().collection(table);
+const fromDoc = d => {
+  const x = d.data({ serverTimestamps: "estimate" });
+  return { ...x, id: d.id, createdAt: x.createdAt && x.createdAt.toMillis ? x.createdAt.toMillis() : 0 };
+};
+async function ins(table, rows) {
+  const list = Array.isArray(rows) ? rows : [rows];
+  const batch = S.fs.batch(); const out = [];
+  for (const r of list) {
+    const ref = col(table).doc();
+    const body = { ...defined(r), createdBy: S.uid, createdAt: FV().serverTimestamp() };
+    if (table === "logs") body.by = S.uid;
+    batch.set(ref, body); out.push({ id: ref.id });
+  }
+  await batch.commit();
+  return out;
+}
+const upd = (table, id, patch) => col(table).doc(id).update(defined(patch));
+const del = (table, id) => col(table).doc(id).delete();
+async function deleteAsset(id) {
+  const refs = [col("assets").doc(id),
+    ...[...S.tasks.values()].filter(t => t.assetId === id).map(t => col("tasks").doc(t.id)),
+    ...[...S.logs.values()].filter(l => l.assetId === id).map(l => col("logs").doc(l.id))];
+  for (let i = 0; i < refs.length; i += 450) {
+    const batch = S.fs.batch();
+    refs.slice(i, i + 450).forEach(r => batch.delete(r));
+    await batch.commit();
+  }
+}
+function stopListening() { S.unsubs.forEach(u => { try { u(); } catch (e) {} }); S.unsubs = []; }
+function listen() {
+  stopListening();
+  const ready = new Set();
+  const markReady = k => { ready.add(k); if (ready.size === 4 && !S.loaded) { S.loaded = true; afterFirstLoad(); } render(); };
+  const onErr = e => { console.error(e); if (e.code === "permission-denied") { toast("You no longer have access to this household."); leaveView(); } };
+  S.unsubs.push(hhRef().onSnapshot(d => {
+    if (!d.exists) { leaveView(); return; }
+    const h = d.data();
+    S.household = { id: d.id, ...h };
+    S.role = h.ownerUid === S.uid ? "owner" : "member";
+    const info = h.memberInfo || {};
+    S.members = (h.memberUids || []).map(uid => ({ user_id: uid, role: uid === h.ownerUid ? "owner" : "member", display_name: info[uid]?.name || "", email: info[uid]?.email || "" }));
+    S.invites = (h.inviteEmails || []).map(email => ({ email }));
+    markReady("household");
+  }, onErr));
+  for (const t of ["assets", "tasks", "logs"])
+    S.unsubs.push(col(t).onSnapshot(snap => { S[t] = new Map(snap.docs.map(d => [d.id, fromDoc(d)])); markReady(t); }, onErr));
+}
+function leaveView() { stopListening(); Object.assign(S, { household: null, assets: new Map(), tasks: new Map(), logs: new Map(), loaded: false }); findHousehold(); }
+
+/* ---------- Status ---------- */
+function logsByTask() {
+  const m = new Map();
+  for (const l of S.logs.values()) { if (!m.has(l.taskId)) m.set(l.taskId, []); m.get(l.taskId).push(l); }
+  for (const arr of m.values()) arr.sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || 0) - (a.createdAt || 0));
+  return m;
+}
+function statusOf(task, asset, logs) {
+  const last = logs[0] || null;
+  const st = { code: "none", last, dueDate: null, daysLeft: null, dueMeter: null, meterLeft: null, unit: asset?.unit || "" };
+  if (!last) return st;
+  const t = today();
+  if (task.days) { st.dueDate = addDays(last.date, task.days); st.daysLeft = daysBetween(t, st.dueDate); }
+  if (task.meter && st.unit) {
+    const lm = logs.find(l => typeof l.meter === "number");
+    if (lm) { st.dueMeter = lm.meter + task.meter; st.meterLeft = st.dueMeter - Math.max(asset.meter || 0, lm.meter); }
+  }
+  const soonDays = task.days ? Math.max(1, Math.min(14, Math.round(task.days * 0.2))) : 0;
+  const over = (st.daysLeft != null && st.daysLeft < 0) || (st.meterLeft != null && st.meterLeft <= 0);
+  const soon = (st.daysLeft != null && st.daysLeft <= soonDays) || (st.meterLeft != null && st.meterLeft <= task.meter * 0.1);
+  st.code = over ? "over" : soon ? "soon" : "ok";
+  return st;
+}
+function pillText(st) {
+  if (st.code === "none") return "Never logged";
+  const bits = [];
+  if (st.daysLeft != null) bits.push(st.daysLeft < 0 ? `${plural(-st.daysLeft, "day")} late` : st.daysLeft === 0 ? "due today" : `in ${plural(st.daysLeft, "day")}`);
+  if (st.meterLeft != null) bits.push(st.meterLeft <= 0 ? `${fmtNum(-st.meterLeft)} ${st.unit} over` : `${fmtNum(st.meterLeft)} ${st.unit} left`);
+  if (!bits.length) return "Done";
+  if (st.code === "over") return bits.filter(b => /late|over/.test(b)).join(", ") || bits[0];
+  return bits.join(" · ");
+}
+const RANK = { over: 0, soon: 1, none: 2, ok: 3 };
+function computeRows() {
+  const lb = logsByTask(); const rows = [];
+  for (const task of S.tasks.values()) {
+    const asset = S.assets.get(task.assetId); if (!asset) continue;
+    const logs = lb.get(task.id) || [];
+    rows.push({ task, asset, logs, st: statusOf(task, asset, logs) });
+  }
+  const urgency = r => {
+    const d = r.st.daysLeft != null ? r.st.daysLeft : 1e6;
+    const m = r.st.meterLeft != null && r.task.meter ? (r.st.meterLeft / r.task.meter) * (r.task.days || 365) : 1e6;
+    return Math.min(d, m);
+  };
+  rows.sort((a, b) => RANK[a.st.code] - RANK[b.st.code] || urgency(a) - urgency(b) || a.task.name.localeCompare(b.task.name));
+  return rows;
+}
+
+/* ---------- People ---------- */
+function who(id) {
+  if (!id) return "";
+  if (id === S.uid) return "you";
+  const m = S.members.find(x => x.user_id === id);
+  return m ? (m.display_name || (m.email || "").split("@")[0] || "family member") : "former member";
+}
+
+/* ---------- Writes ---------- */
+async function write(fn, okMsg) {
+  try { await fn(); if (okMsg) toast(okMsg); return true; }
+  catch (e) {
+    console.error(e);
+    if (e && e.code === "permission-denied") toast("You don't have permission to change that.");
+    else toast("That didn't save. Check your connection and try again.");
+    return false;
+  }
+}
+
+/* ---------- Rendering ---------- */
+function render() {
+  const inApp = S.phase === "app";
+  document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.v === S.view)));
+  $("#addThingBtn").hidden = !inApp;
+  $("#householdBtn").hidden = !inApp;
+  $("#gauges").hidden = !inApp;
+  $(".bar").hidden = !inApp;
+  const view = $("#view");
+  if (!inApp) { view.replaceChildren(gateScreen()); return; }
+  $("#householdBtn").textContent = S.household?.name || "Household";
+
+  const sel = $("#assetFilter");
+  const assets = [...S.assets.values()].sort((a, b) => a.name.localeCompare(b.name));
+  if (S.asset !== "all" && !S.assets.has(S.asset) && S.loaded) S.asset = "all";
+  sel.replaceChildren(h("option", { value: "all" }, "Everything"), ...assets.map(a => h("option", { value: a.id }, a.name)));
+  sel.value = S.asset;
+  $(".filter").hidden = S.view === "things" || assets.length < 2;
+
+  const rows = computeRows();
+  const scoped = rows.filter(r => S.asset === "all" || r.asset.id === S.asset);
+  for (const c of ["over", "soon", "none", "ok"]) $("#n-" + c).textContent = scoped.filter(r => r.st.code === c).length;
+  document.querySelectorAll(".gauge").forEach(g => g.setAttribute("aria-pressed", String(S.status === g.dataset.f)));
+
+  if (!S.loaded) { view.replaceChildren(h("div", { class: "empty" }, h("h2", null, "Loading the ledger"), h("p", null, "Your family's maintenance records will appear here in a moment."))); return; }
+  if (!S.assets.size) { view.replaceChildren(emptyState()); return; }
+  if (S.view === "due") view.replaceChildren(renderDue(scoped));
+  else if (S.view === "things") view.replaceChildren(renderThings(rows));
+  else view.replaceChildren(renderHistory());
+}
+
+/* Sign-in, check-your-email and first-time household setup */
+function gateScreen() {
+  if (S.phase === "boot") return h("div", { class: "empty" }, h("h2", null, "Opening the ledger"), h("p", null, "Checking whether you're signed in."));
+  if (S.phase === "config") return h("div", { class: "empty" }, h("h2", null, "Almost ready"),
+    h("p", null, "This copy of the ledger isn't connected to a database yet. Add your Firebase web app settings to config.js, then reload."));
+  if (S.phase === "sent") return h("div", { class: "empty" }, h("h2", null, "Check your email"),
+    h("p", null, `We sent a sign-in link to ${S.email}. Open it on this device and you'll land back here, signed in. It can take a minute, and it may land in spam.`),
+    h("div", { class: "quick" }, h("button", { class: "btn", type: "button", onclick: () => { S.phase = "signin"; render(); } }, "Use a different email")));
+  if (S.phase === "confirm") {
+    const email = h("input", { type: "email", id: "f-cemail", required: true, autocomplete: "email" });
+    return h("form", { class: "empty", onsubmit: async e => { e.preventDefault(); await finishEmailLink(email.value.trim()); } },
+      h("h2", null, "Confirm your email"),
+      h("p", null, "You opened the sign-in link on a different device or browser. Enter the same email address to finish signing in."),
+      h("div", { class: "field", style: "max-width:420px" }, h("label", { for: "f-cemail" }, "Email"), email),
+      h("div", { class: "quick" }, h("button", { class: "btn primary", type: "submit" }, "Sign in")));
+  }
+  if (S.phase === "setup") {
+    const hname = h("input", { type: "text", id: "f-hname", maxlength: "80", placeholder: "e.g. The Modjeska house" });
+    const yname = h("input", { type: "text", id: "f-yname", maxlength: "60", placeholder: "What the family calls you" });
+    yname.value = (S.user?.displayName || "").slice(0, 60);
+    const go = h("button", { class: "btn primary", type: "submit" }, "Create our ledger");
+    return h("form", { class: "empty", onsubmit: async e => {
+      e.preventDefault();
+      if (!hname.value.trim()) { hname.focus(); toast("Name your household first."); return; }
+      go.disabled = true;
+      const ok = await write(() => S.fs.collection("households").add({
+        name: hname.value.trim(), ownerUid: S.uid, memberUids: [S.uid], inviteEmails: [],
+        memberInfo: { [S.uid]: { name: yname.value.trim(), email: S.email } }, createdAt: FV().serverTimestamp() }));
+      if (ok) await findHousehold(); else go.disabled = false;
+    } },
+      h("h2", null, "Set up your household"),
+      h("p", null, `You're signed in as ${S.email}. Name the household, then invite family from the household menu. If someone already invited you, check that you signed in with the email they used.`),
+      h("div", { class: "fields" }, h("div", { class: "field" }, h("label", { for: "f-hname" }, "Household name"), hname), h("div", { class: "field" }, h("label", { for: "f-yname" }, "Your name"), yname)),
+      h("div", { class: "quick" }, go, h("button", { class: "btn ghost", type: "button", onclick: signOut }, "Sign out")));
+  }
+  const email = h("input", { type: "email", id: "f-email", required: true, autocomplete: "email", placeholder: "you@example.com" });
+  email.value = S.email || "";
+  const go = h("button", { class: "btn", type: "submit" }, "Email me a sign-in link");
+  const google = h("button", { class: "btn primary", type: "button", onclick: async () => {
+    google.disabled = true;
+    try { await S.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
+    catch (e) {
+      google.disabled = false;
+      if (e.code === "auth/popup-blocked" || e.code === "auth/operation-not-supported-in-this-environment") await S.auth.signInWithRedirect(new firebase.auth.GoogleAuthProvider());
+      else if (e.code !== "auth/popup-closed-by-user" && e.code !== "auth/cancelled-popup-request") toast("Google sign-in didn't work. Try the email link instead.");
+    }
+  } }, "Continue with Google");
+  return h("form", { class: "empty", onsubmit: async e => {
+    e.preventDefault();
+    const addr = email.value.trim().toLowerCase();
+    if (!addr) { email.focus(); return; }
+    go.disabled = true;
+    try {
+      await S.auth.sendSignInLinkToEmail(addr, { url: location.origin + location.pathname, handleCodeInApp: true });
+      try { localStorage.setItem("ul-email", addr); } catch (err) {}
+      S.email = addr; S.phase = "sent"; render();
+    } catch (err) {
+      console.error(err); go.disabled = false;
+      toast(err.code === "auth/quota-exceeded" ? "Too many sign-in emails today. Use Google, or try again tomorrow." : "We couldn't send the link. Check the address and try again.");
+    }
+  } },
+    h("h2", null, "Sign in"),
+    h("p", null, "Use your Google account, or get a sign-in link by email. No password needed. Family members need an invite from whoever set up the household."),
+    h("div", { class: "quick" }, google),
+    h("div", { class: "field", style: "max-width:420px" }, h("label", { for: "f-email" }, "Or sign in with email"), email),
+    h("div", { class: "quick" }, go));
+}
+
+function emptyState() {
+  const quick = Object.entries(KINDS).filter(([k]) => ["home", "vehicle", "generator", "yard", "other"].includes(k))
+    .map(([k, v]) => h("button", { class: "btn", type: "button", onclick: () => openThing(null, k) }, k === "home" ? "Our home" : k === "vehicle" ? "A vehicle" : k === "generator" ? "A generator" : v.label));
+  return h("div", { class: "empty" },
+    h("h2", null, "Start your ledger"),
+    h("p", null, "Add the things you take care of: the house, each car, the generator, the mower. Each one comes with a checklist of common upkeep tasks you can pick from, and you can add your own."),
+    h("div", { class: "quick" }, quick));
+}
+
+function renderDue(rows) {
+  const frag = document.createDocumentFragment();
+  if (!rows.length) {
+    frag.append(h("div", { class: "empty" }, h("h2", null, "No tasks yet"), h("p", null, "Open Things and add tasks from the checklist, or create your own."),
+      h("div", { class: "quick" }, h("button", { class: "btn", type: "button", onclick: () => setView("things") }, "Go to Things"))));
+    return frag;
+  }
+  const groups = [["over", "Overdue"], ["soon", "Due soon"], ["none", "Never logged"], ["ok", "Up to date"]];
+  let shown = 0;
+  for (const [code, title] of groups) {
+    if (S.status && S.status !== code) continue;
+    const g = rows.filter(r => r.st.code === code);
+    if (!g.length) continue;
+    shown++;
+    frag.append(h("section", { class: "group" },
+      h("h2", null, title, h("span", { class: "count" }, g.length)),
+      h("div", { class: "list" }, g.map(rowEl))));
+  }
+  if (!shown) frag.append(h("div", { class: "empty" }, h("h2", null, "Nothing in this group"), h("p", null, "Tap the highlighted count again to see every task.")));
+  return frag;
+}
+function rowEl(r) {
+  const { task, asset, st } = r;
+  const last = st.last;
+  const lastCell = last
+    ? h("div", { class: "cell" }, h("span", { class: "lbl" }, "Last done"), fmtDate(last.date), typeof last.meter === "number" && asset.unit ? [" · ", odo(last.meter, asset.unit)] : null, last.by ? h("span", { class: "muted" }, ` · ${who(last.by)}`) : null)
+    : h("div", { class: "cell" }, h("span", { class: "lbl" }, "Last done"), h("span", { class: "muted" }, "No record yet"));
+  const nextBits = [];
+  if (st.dueDate) nextBits.push(fmtDate(st.dueDate));
+  if (st.dueMeter != null) { if (nextBits.length) nextBits.push(" or "); nextBits.push(odo(st.dueMeter, asset.unit)); }
+  const nextCell = h("div", { class: "cell" }, h("span", { class: "lbl" }, "Next due"),
+    nextBits.length ? nextBits : h("span", { class: "muted" }, fmtEvery(task.days, task.meter, asset.unit)), h("br"), h("span", { class: "pill" }, pillText(st)));
+  return h("article", { class: `row s-${st.code}`, tabindex: "0", onclick: e => { if (!e.target.closest("button")) openTask(task.id); }, onkeydown: e => { if (e.key === "Enter" && e.target === e.currentTarget) openTask(task.id); } },
+    h("div", { class: "cell" }, h("div", { class: "r-title" }, task.name), h("div", { class: "r-asset" }, asset.name)),
+    lastCell, nextCell,
+    h("button", { class: "btn small r-btn", type: "button", onclick: () => openLog(task.id) }, "Log it"));
+}
+
+function renderThings(rows) {
+  const assets = [...S.assets.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return h("div", { class: "cards" }, assets.map(a => {
+    const mine = rows.filter(r => r.asset.id === a.id);
+    const cnt = c => mine.filter(r => r.st.code === c).length;
+    const dots = [["over", "overdue"], ["soon", "due soon"], ["none", "never logged"], ["ok", "up to date"]]
+      .filter(([c]) => cnt(c)).map(([c, w]) => h("span", { class: `s-${c}` }, h("i"), `${cnt(c)} ${w}`));
+    return h("article", { class: "card" },
+      h("div", { class: "card-head" }, h("div", null, h("h3", null, a.name), a.detail ? h("div", { class: "r-asset" }, a.detail) : null), h("span", { class: "kind" }, KINDS[a.kind]?.label || "Other")),
+      a.unit ? h("div", { class: "meter-line" }, h("span", { class: "muted" }, a.unit === "hr" ? "Hour meter" : "Odometer"), a.meter != null ? odo(a.meter, a.unit) : h("span", { class: "muted" }, "not recorded"),
+        h("button", { class: "btn ghost small", type: "button", onclick: () => openMeter(a.id) }, "Update")) : null,
+      h("div", { class: "dots" }, dots.length ? dots : h("span", { class: "muted" }, "No tasks yet")),
+      h("div", { class: "card-actions" },
+        h("button", { class: "btn small", type: "button", onclick: () => { S.asset = a.id; saveFilter(); setView("due"); } }, "See tasks"),
+        h("button", { class: "btn small", type: "button", onclick: () => openAddTasks(a.id) }, "+ Tasks"),
+        h("button", { class: "btn ghost small", type: "button", onclick: () => openThing(a.id) }, "Edit")));
+  }), h("button", { class: "card add-card", type: "button", onclick: () => openThing(null, "vehicle") }, "+ Add another thing"));
+}
+
+function renderHistory() {
+  const logs = [...S.logs.values()].filter(l => S.asset === "all" || l.assetId === S.asset)
+    .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 300);
+  if (!logs.length) return h("div", { class: "empty" }, h("h2", null, "No history yet"), h("p", null, "Every time someone taps Log it, the entry shows up here with the date, the reading and who did it."));
+  return h("div", { class: "hist" }, logs.map(histRow));
+}
+function histRow(l) {
+  const task = S.tasks.get(l.taskId), asset = S.assets.get(l.assetId);
+  return h("div", { class: "hrow" },
+    h("div", { class: "hdate" }, fmtDate(l.date)),
+    h("div", { style: "min-width:0" },
+      h("div", { class: "r-title" }, task?.name || l.taskName || "Deleted task"),
+      h("div", { class: "r-asset" }, asset?.name || "Removed", typeof l.meter === "number" && asset?.unit ? [" · ", odo(l.meter, asset.unit)] : null, l.by ? ` · ${who(l.by)}` : null),
+      l.note ? h("div", { class: "hnote" }, l.note) : null),
+    confirmBtn("Delete", async b => { if (await write(() => del("logs", l.id), "Entry deleted")) b.closest(".hrow")?.remove(); }));
+}
+
+/* ---------- Modal plumbing ---------- */
+let lastFocus = null;
+function openSheet(title, kicker, body, foot) {
+  lastFocus = document.activeElement;
+  const sheet = $("#sheet");
+  sheet.setAttribute("aria-label", title);
+  sheet.replaceChildren(
+    h("div", { class: "sheet-head" }, h("div", null, h("h2", null, title), kicker ? h("div", { class: "kicker" }, kicker) : null), h("button", { class: "x", type: "button", "aria-label": "Close", onclick: closeSheet }, "×")),
+    h("div", { class: "sheet-body" }, body),
+    foot ? h("div", { class: "sheet-foot" }, foot) : null);
+  $("#modal").hidden = false;
+  const first = sheet.querySelector(".sheet-body input, .sheet-body select, .sheet-body textarea");
+  (first || sheet.querySelector(".x")).focus();
+}
+function closeSheet() { $("#modal").hidden = true; $("#sheet").replaceChildren(); if (lastFocus && lastFocus.isConnected) lastFocus.focus(); }
+$("#modal").addEventListener("click", e => { if (e.target.id === "modal") closeSheet(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#modal").hidden) closeSheet(); });
+function field(label, input, id) { input.id = id; return h("div", { class: "field" }, h("label", { for: id }, label), input); }
+function confirmBtn(label, action) {
+  let armed = false, timer;
+  const b = h("button", { class: "btn small danger", type: "button" }, label);
+  b.addEventListener("click", async () => {
+    if (!armed) { armed = true; b.classList.add("armed"); b.textContent = "Tap again to confirm"; timer = setTimeout(() => { armed = false; b.classList.remove("armed"); b.textContent = label; }, 3500); return; }
+    clearTimeout(timer); b.disabled = true; await action(b); b.disabled = false; armed = false; b.classList.remove("armed"); b.textContent = label;
+  });
+  return b;
+}
+function numOrNull(v) { const n = parseFloat(String(v).replace(/,/g, "")); return Number.isFinite(n) && n >= 0 ? n : null; }
+
+/* ---------- Thing (asset) sheet ---------- */
+function presetList(kindKey, unit, existingNames, preCheck = true) {
+  const presets = (KINDS[kindKey]?.presets || []).filter(p => !existingNames.has(p[0].toLowerCase()));
+  if (!presets.length) return { el: h("p", { class: "hint" }, existingNames.size ? "Every suggested task is already on the list. Add your own below." : "No suggested tasks for this kind of thing. Add your own after saving."), get: () => [] };
+  const boxes = [];
+  const list = h("div", { class: "presets" }, presets.map((p, i) => {
+    const meter = presetMeter(kindKey, p[2], unit);
+    const cb = h("input", { type: "checkbox", id: `pre-${i}` }); cb.checked = preCheck && !!p[3]; boxes.push([cb, p, meter]);
+    return h("label", { class: "preset", for: `pre-${i}` }, cb, h("span", { class: "pname" }, p[0]), h("span", { class: "pint" }, fmtEvery(p[1], meter, unit)), p[4] ? h("span", { class: "ptip" }, p[4]) : null);
+  }));
+  const all = h("button", { class: "btn ghost small", type: "button", onclick: () => { const on = boxes.some(([cb]) => !cb.checked); boxes.forEach(([cb]) => cb.checked = on); all.textContent = on ? "Clear all" : "Select all"; } }, "Select all");
+  return {
+    el: h("div", { class: "field" }, h("div", { class: "preset-tools" }, h("span", { class: "flabel" }, "Suggested tasks"), all), list,
+      h("p", { class: "hint" }, "Intervals are typical guidance. Your owner's manual wins; you can change any interval later.")),
+    get: () => boxes.filter(([cb]) => cb.checked).map(([, p, meter]) => ({ name: p[0], days: p[1] || null, meter: meter || null, notes: p[4] || "" }))
+  };
+}
+function openThing(assetId, kindKey) {
+  const a = assetId ? S.assets.get(assetId) : null;
+  const kind = h("select", null, Object.entries(KINDS).map(([k, v]) => h("option", { value: k }, v.label)));
+  kind.value = a?.kind || kindKey || "home";
+  const name = h("input", { type: "text", placeholder: "e.g. Mom's Highlander", maxlength: "80" }); name.value = a?.name || "";
+  const detail = h("input", { type: "text", placeholder: "Year, make, model, location", maxlength: "120" }); detail.value = a?.detail || "";
+  const unit = h("select", null, Object.entries(UNIT_NAMES).map(([k, v]) => h("option", { value: k }, v)));
+  unit.value = a ? (a.unit || "") : KINDS[kind.value].unit;
+  const reading = h("input", { type: "number", min: "0", step: "1", inputmode: "numeric", placeholder: "Current reading" }); reading.value = a?.meter ?? "";
+  const readingField = field("Current reading", reading, "f-reading");
+  const presetBox = h("div");
+  let presets = { get: () => [] };
+  const defaultName = k => k === "home" ? "Home" : "";
+  const refresh = () => {
+    readingField.hidden = !unit.value;
+    if (!a) { presets = presetList(kind.value, unit.value, new Set()); presetBox.replaceChildren(presets.el); }
+  };
+  kind.addEventListener("change", () => { unit.value = KINDS[kind.value].unit; if (!name.value || name.value === "Home") name.value = defaultName(kind.value); refresh(); });
+  unit.addEventListener("change", refresh);
+  if (!a && !name.value) name.value = defaultName(kind.value);
+  refresh();
+
+  const save = h("button", { class: "btn primary", type: "button" }, a ? "Save changes" : "Add it");
+  save.addEventListener("click", async () => {
+    const nm = name.value.trim();
+    if (!nm) { name.focus(); toast("Give it a name first."); return; }
+    save.disabled = true;
+    const meter = unit.value ? numOrNull(reading.value) : null;
+    const body = { name: nm, kind: kind.value, detail: detail.value.trim(), unit: unit.value, meter, meterDate: meter != null ? (a?.meter === meter ? a.meterDate || today() : today()) : null };
+    const ok = await write(async () => {
+      if (a) { await upd("assets", a.id, body); }
+      else {
+        const [row] = await ins("assets", body);
+        const picks = presets.get();
+        if (picks.length) await ins("tasks", picks.map(t => ({ ...t, assetId: row.id })));
+      }
+    }, a ? "Saved" : `${nm} added`);
+    if (ok) closeSheet(); else save.disabled = false;
+  });
+  const foot = [];
+  if (a) foot.push(confirmBtn("Delete", async () => {
+    const ok = await write(() => deleteAsset(a.id), `${a.name} deleted`);
+    if (ok) closeSheet();
+  }), h("span", { style: "flex:1" }));
+  foot.push(h("button", { class: "btn", type: "button", onclick: closeSheet }, "Cancel"), save);
+  openSheet(a ? "Edit thing" : "Add a thing", a ? (a.detail || KINDS[a.kind]?.label) : "The house, a car, the generator, the mower…",
+    [h("div", { class: "fields" }, field("Kind", kind, "f-kind"), field("Name", name, "f-name")),
+     field("Details (optional)", detail, "f-detail"),
+     h("div", { class: "fields" }, field("Tracks", unit, "f-unit"), readingField),
+     a ? h("p", { class: "hint" }, "Deleting a thing also removes its tasks and history.") : presetBox], foot);
+}
+
+/* ---------- Add tasks to an existing thing ---------- */
+function openAddTasks(assetId) {
+  const a = S.assets.get(assetId);
+  const existing = new Set([...S.tasks.values()].filter(t => t.assetId === assetId).map(t => t.name.toLowerCase()));
+  const presets = presetList(a.kind, a.unit, existing, false);
+  const save = h("button", { class: "btn primary", type: "button" }, "Add selected");
+  save.addEventListener("click", async () => {
+    const picks = presets.get();
+    if (!picks.length) { toast("Tick at least one task, or create your own."); return; }
+    save.disabled = true;
+    const ok = await write(() => ins("tasks", picks.map(t => ({ ...t, assetId }))), `${plural(picks.length, "task")} added`);
+    if (ok) closeSheet(); else save.disabled = false;
+  });
+  openSheet("Add tasks", a.name, [presets.el],
+    [h("button", { class: "btn", type: "button", onclick: () => openTaskForm(null, assetId) }, "Create my own"), h("span", { style: "flex:1" }), h("button", { class: "btn", type: "button", onclick: closeSheet }, "Cancel"), save]);
+}
+
+/* ---------- Custom / edit task ---------- */
+function openTaskForm(taskId, assetId) {
+  const t = taskId ? S.tasks.get(taskId) : null;
+  const a = S.assets.get(t ? t.assetId : assetId);
+  const name = h("input", { type: "text", maxlength: "100", placeholder: "e.g. Replace water filter under sink" }); name.value = t?.name || "";
+  const days = h("input", { type: "number", min: "0", step: "1", inputmode: "numeric", placeholder: "e.g. 90" }); days.value = t?.days ?? "";
+  const meter = h("input", { type: "number", min: "0", step: "1", inputmode: "numeric", placeholder: a.unit === "hr" ? "e.g. 100" : "e.g. 5000" }); meter.value = t?.meter ?? "";
+  const notes = h("textarea", { maxlength: "500", placeholder: "Part numbers, filter size, oil type, who services it…" }); notes.value = t?.notes || "";
+  const save = h("button", { class: "btn primary", type: "button" }, t ? "Save changes" : "Add task");
+  save.addEventListener("click", async () => {
+    const nm = name.value.trim(); if (!nm) { name.focus(); toast("Name the task first."); return; }
+    const d = numOrNull(days.value), m = numOrNull(meter.value);
+    const body = { name: nm, days: d ? Math.round(d) : null, meter: a.unit && m ? m : null, notes: notes.value.trim() };
+    save.disabled = true;
+    const ok = await write(() => t ? upd("tasks", t.id, body) : ins("tasks", { ...body, assetId: a.id }), t ? "Saved" : "Task added");
+    if (ok) { closeSheet(); if (t) openTask(t.id); } else save.disabled = false;
+  });
+  openSheet(t ? "Edit task" : "New task", a.name,
+    [field("Task", name, "f-tname"),
+     h("div", { class: "fields" }, field("Repeat every (days)", days, "f-days"), a.unit ? field(`…or every (${a.unit})`, meter, "f-meter") : h("div")),
+     h("p", { class: "hint" }, a.unit ? "Fill in one or both. The task comes due at whichever arrives first." : "Leave blank for a one-off or as-needed task."),
+     field("Notes (optional)", notes, "f-notes")],
+    [h("button", { class: "btn", type: "button", onclick: closeSheet }, "Cancel"), save]);
+}
+
+/* ---------- Log sheet ---------- */
+function openLog(taskId) {
+  const t = S.tasks.get(taskId), a = S.assets.get(t.assetId);
+  const logs = logsByTask().get(taskId) || [];
+  const date = h("input", { type: "date", max: today() }); date.value = today();
+  const reading = h("input", { type: "number", min: "0", step: "1", inputmode: "numeric", placeholder: a.meter != null ? `Last known ${fmtNum(a.meter)}` : "Current reading" });
+  const note = h("textarea", { maxlength: "500", placeholder: "Brand, part number, shop, cost… (optional)" });
+  const save = h("button", { class: "btn primary", type: "button" }, "Save entry");
+  save.addEventListener("click", async () => {
+    if (!date.value) { date.focus(); toast("Pick the date it was done."); return; }
+    const m = a.unit ? numOrNull(reading.value) : null;
+    save.disabled = true;
+    const ok = await write(async () => {
+      await ins("logs", { taskId, assetId: a.id, taskName: t.name, date: date.value, meter: m, note: note.value.trim() });
+      if (m != null && (a.meter == null || m > a.meter)) await upd("assets", a.id, { meter: m, meterDate: date.value });
+    }, "Logged");
+    if (ok) closeSheet(); else save.disabled = false;
+  });
+  const last = logs[0];
+  openSheet("Log it", `${t.name} · ${a.name}`,
+    [last ? h("p", { class: "hint" }, `Last done ${fmtDate(last.date)}${last.by ? " by " + who(last.by) : ""}.`) : null,
+     h("div", { class: "fields" }, field("Date done", date, "f-date"), a.unit ? field(a.unit === "hr" ? "Hour meter reading" : "Odometer reading", reading, "f-lreading") : h("div")),
+     field("Notes", note, "f-lnote")],
+    [h("button", { class: "btn", type: "button", onclick: closeSheet }, "Cancel"), save]);
+}
+
+/* ---------- Meter sheet ---------- */
+function openMeter(assetId) {
+  const a = S.assets.get(assetId);
+  const reading = h("input", { type: "number", min: "0", step: "1", inputmode: "numeric" }); reading.value = a.meter ?? "";
+  const save = h("button", { class: "btn primary", type: "button" }, "Save reading");
+  save.addEventListener("click", async () => {
+    const m = numOrNull(reading.value); if (m == null) { reading.focus(); toast("Enter a number."); return; }
+    save.disabled = true;
+    const ok = await write(() => upd("assets", a.id, { meter: m, meterDate: today() }), "Reading saved");
+    if (ok) closeSheet(); else save.disabled = false;
+  });
+  openSheet(a.unit === "hr" ? "Update hour meter" : "Update odometer", a.name,
+    [field(`Current reading (${a.unit})`, reading, "f-mreading"),
+     h("p", { class: "hint" }, "Mileage- and hour-based tasks use this to work out what's due.")],
+    [h("button", { class: "btn", type: "button", onclick: closeSheet }, "Cancel"), save]);
+}
+
+/* ---------- Task detail sheet ---------- */
+function openTask(taskId) {
+  const t = S.tasks.get(taskId); if (!t) return;
+  const a = S.assets.get(t.assetId);
+  const logs = logsByTask().get(taskId) || [];
+  const st = statusOf(t, a, logs);
+  const facts = h("div", { class: "facts" },
+    h("div", { class: `fact status s-${st.code}` }, h("span", { class: "lbl" }, "Status"), h("strong", null, pillText(st))),
+    h("div", { class: "fact" }, h("span", { class: "lbl" }, "Schedule"), fmtEvery(t.days, t.meter, a.unit)),
+    h("div", { class: "fact" }, h("span", { class: "lbl" }, "Last done"), st.last ? [fmtDate(st.last.date), st.last.by ? ` by ${who(st.last.by)}` : ""] : "No record yet"),
+    h("div", { class: "fact" }, h("span", { class: "lbl" }, "Next due"), st.dueDate || st.dueMeter != null ? [st.dueDate ? fmtDate(st.dueDate) : "", st.dueDate && st.dueMeter != null ? " or " : "", st.dueMeter != null ? odo(st.dueMeter, a.unit) : ""] : "Log it once to start the clock"));
+  const hist = logs.length ? h("div", { class: "hist" }, logs.map(histRow)) : h("p", { class: "hint" }, "No entries yet.");
+  openSheet(t.name, a.name + (a.detail ? ` · ${a.detail}` : ""),
+    [facts, t.notes ? h("div", null, h("span", { class: "lbl" }, "Notes"), h("div", { class: "hnote", style: "color:var(--ink)" }, t.notes)) : null,
+     h("h3", { class: "sec-title" }, `History (${logs.length})`), hist],
+    [confirmBtn("Delete task", async () => { const ok = await write(() => del("tasks", t.id), "Task deleted"); if (ok) closeSheet(); }),
+     h("span", { style: "flex:1" }),
+     h("button", { class: "btn", type: "button", onclick: () => openTaskForm(t.id) }, "Edit"),
+     h("button", { class: "btn primary", type: "button", onclick: () => openLog(t.id) }, "Log it")]);
+}
+
+/* ---------- Household sheet: your name, family, invites, sign out ---------- */
+function openHousehold() {
+  const owner = S.role === "owner";
+  const me = S.members.find(m => m.user_id === S.uid);
+  const myName = h("input", { type: "text", maxlength: "60", placeholder: "What the family calls you" }); myName.value = me?.display_name || "";
+  const saveName = h("button", { class: "btn small", type: "button" }, "Save name");
+  saveName.addEventListener("click", async () => {
+    saveName.disabled = true;
+    await write(() => hhRef().update({ [`memberInfo.${S.uid}`]: { name: myName.value.trim().slice(0, 60), email: S.email } }), "Name saved");
+    saveName.disabled = false;
+  });
+  const people = h("div", { class: "hist" }, S.members.map(m => h("div", { class: "hrow member" },
+    h("div", { style: "min-width:0" }, h("div", { class: "r-title" }, m.user_id === S.uid ? `${m.display_name || "You"} (you)` : (m.display_name || "No name yet")), h("div", { class: "r-asset" }, m.email || "")),
+    h("span", { class: "kind" }, m.role === "owner" ? "Owner" : "Family"),
+    owner && m.user_id !== S.uid ? confirmBtn("Remove", async b => { if (await write(() => hhRef().update({ memberUids: FV().arrayRemove(m.user_id), [`memberInfo.${m.user_id}`]: FV().delete() }), "Removed")) b.closest(".hrow")?.remove(); }) : h("span"))));
+  const pending = S.invites.length ? h("div", { class: "hist" }, S.invites.map(i => h("div", { class: "hrow member" },
+    h("div", { style: "min-width:0" }, h("div", { class: "r-title" }, i.email), h("div", { class: "r-asset" }, "Invited, hasn't signed in yet")),
+    h("span"),
+    owner ? confirmBtn("Cancel", async b => { if (await write(() => hhRef().update({ inviteEmails: FV().arrayRemove(i.email) }), "Invite cancelled")) b.closest(".hrow")?.remove(); }) : h("span")))) : null;
+  const invite = h("input", { type: "email", placeholder: "family@example.com", autocomplete: "off" });
+  const sendInvite = h("button", { class: "btn small primary", type: "button" }, "Invite");
+  sendInvite.addEventListener("click", async () => {
+    const e = invite.value.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { invite.focus(); toast("Enter a full email address."); return; }
+    if (S.members.some(m => m.email === e)) { toast("They're already in the household."); return; }
+    sendInvite.disabled = true;
+    const ok = await write(() => hhRef().update({ inviteEmails: FV().arrayUnion(e) }), "Invited");
+    sendInvite.disabled = false;
+    if (ok) setTimeout(openHousehold, 50);
+  });
+  openSheet(S.household.name, `Signed in as ${S.email}`,
+    [h("div", { class: "field" }, h("label", { for: "f-myname" }, "Your name"), h("div", { class: "inline" }, Object.assign(myName, { id: "f-myname" }), saveName)),
+     h("h3", { class: "sec-title" }, `Family (${S.members.length})`), people,
+     owner ? [h("div", { class: "field" }, h("label", { for: "f-invite" }, "Invite someone"), h("div", { class: "inline" }, Object.assign(invite, { id: "f-invite" }), sendInvite),
+       h("p", { class: "hint" }, `Then send them ${location.origin} and tell them to sign in with that email, or with Google if it's a Gmail address. They'll join automatically. The app doesn't send the invite for you.`)),
+       pending ? [h("h3", { class: "sec-title" }, "Waiting to join"), pending] : null] : h("p", { class: "hint" }, "Only the household owner can invite or remove people.")],
+    [h("button", { class: "btn", type: "button", onclick: signOut }, "Sign out"), h("span", { style: "flex:1" }), h("button", { class: "btn primary", type: "button", onclick: closeSheet }, "Done")]);
+}
+
+/* ---------- Controls ---------- */
+function setView(v) { S.view = v; try { history.replaceState(null, "", "#" + v); } catch (e) {} render(); }
+function saveFilter() { try { localStorage.setItem("ul-asset", S.asset); } catch (e) {} }
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => setView(t.dataset.v)));
+document.querySelectorAll(".gauge").forEach(g => g.addEventListener("click", () => { S.status = S.status === g.dataset.f ? null : g.dataset.f; if (S.view !== "due") S.view = "due"; render(); }));
+$("#assetFilter").addEventListener("change", e => { S.asset = e.target.value; saveFilter(); render(); });
+$("#addThingBtn").addEventListener("click", () => openThing(null, S.assets.size ? "vehicle" : "home"));
+$("#householdBtn").addEventListener("click", openHousehold);
+
+/* ---------- Session ---------- */
+async function signOut() {
+  closeSheet();
+  stopListening();
+  await S.auth.signOut();
+}
+function resetData() {
+  stopListening();
+  Object.assign(S, { user: null, uid: null, household: null, role: "member", members: [], invites: [], assets: new Map(), tasks: new Map(), logs: new Map(), loaded: false });
+}
+async function startSession(user) {
+  S.user = user; S.uid = user.uid; S.email = (user.email || "").toLowerCase();
+  if (user.emailVerified && S.email) {
+    try {
+      const invited = await S.fs.collection("households").where("inviteEmails", "array-contains", S.email).get();
+      for (const d of invited.docs) {
+        await d.ref.update({
+          memberUids: FV().arrayUnion(S.uid), inviteEmails: FV().arrayRemove(S.email),
+          [`memberInfo.${S.uid}`]: { name: (user.displayName || "").slice(0, 60), email: S.email } });
+      }
+    } catch (e) { console.warn("joining invited household failed", e); }
+  }
+  await findHousehold();
+}
+async function findHousehold() {
+  try {
+    const snap = await S.fs.collection("households").where("memberUids", "array-contains", S.uid).get();
+    if (snap.empty) { S.phase = "setup"; render(); return; }
+    const d = snap.docs.sort((a, b) => (a.data().ownerUid === S.uid ? -1 : 0) - (b.data().ownerUid === S.uid ? -1 : 0))[0];
+    S.household = { id: d.id, ...d.data() }; S.phase = "app"; S.loaded = false;
+    render();
+    listen();
+  } catch (e) {
+    console.error(e); toast("The ledger didn't load. Check your connection and reload.");
+  }
+}
+function afterFirstLoad() {
+  const me = S.members.find(m => m.user_id === S.uid);
+  if (me && !me.display_name) { toast("Add your name so the family knows who logged what."); openHousehold(); }
+}
+async function finishEmailLink(email) {
+  try {
+    await S.auth.signInWithEmailLink(email, location.href);
+    try { localStorage.removeItem("ul-email"); } catch (e) {}
+    history.replaceState(null, "", location.pathname + location.hash);
+  } catch (e) {
+    console.error(e); S.phase = "signin"; render();
+    toast(e.code === "auth/invalid-action-code" || e.code === "auth/expired-action-code" ? "That sign-in link has expired or was already used. Send a new one." : "Sign-in didn't work. Send a new link and try again.");
+  }
+}
+(async () => {
+  render();
+  const fb = CFG.firebase;
+  if (!fb || !fb.apiKey || !window.firebase) { S.phase = "config"; render(); return; }
+  firebase.initializeApp(fb);
+  S.auth = firebase.auth();
+  S.fs = firebase.firestore();
+  if (CFG.useEmulators) { S.auth.useEmulator("http://127.0.0.1:9099"); S.fs.useEmulator("127.0.0.1", 8080); }
+  try { await S.fs.enablePersistence({ synchronizeTabs: true }); } catch (e) {}
+  if (S.auth.isSignInWithEmailLink(location.href)) {
+    let saved = ""; try { saved = localStorage.getItem("ul-email") || ""; } catch (e) {}
+    if (saved) await finishEmailLink(saved); else { S.phase = "confirm"; render(); }
+  }
+  S.auth.onAuthStateChanged(user => {
+    if (user) { if (user.uid !== S.uid) startSession(user); }
+    else { resetData(); if (S.phase !== "confirm") { S.phase = "signin"; render(); } }
+  });
+})();
+</script>
+</body>
+</html>

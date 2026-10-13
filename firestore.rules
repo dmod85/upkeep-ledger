@@ -1,0 +1,111 @@
+rules_version = '2';
+
+// Upkeep Ledger security rules.
+// A household document lists its members. Only members can read or change the
+// household's things, tasks and history. The owner invites family by email; an
+// invited person can add themselves and nothing else.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+    function verifiedEmail() {
+      return signedIn() && request.auth.token.email != null && request.auth.token.email_verified == true;
+    }
+    function changed() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+    function onlyMyMemberInfoChanged() {
+      return request.resource.data.memberInfo.diff(resource.data.memberInfo).affectedKeys().hasOnly([request.auth.uid]);
+    }
+    function validMemberInfo(info) {
+      return info.keys().hasOnly(['name', 'email']) && info.get('name', '') is string && info.get('name', '').size() <= 60;
+    }
+
+    match /households/{householdId} {
+      function isMember() {
+        return signedIn() && request.auth.uid in resource.data.memberUids;
+      }
+      function isOwner() {
+        return signedIn() && resource.data.ownerUid == request.auth.uid;
+      }
+      function isInvited() {
+        return verifiedEmail() && myEmail() in resource.data.inviteEmails;
+      }
+
+      allow read: if isMember() || isInvited();
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['name', 'ownerUid', 'memberUids', 'inviteEmails', 'memberInfo', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 80
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.memberUids == [request.auth.uid]
+        && request.resource.data.inviteEmails is list
+        && request.resource.data.memberInfo.keys().hasOnly([request.auth.uid]);
+
+      allow update: if
+        // The owner renames the household, invites people and removes members, but stays owner and member.
+        (isOwner()
+          && changed().hasOnly(['name', 'memberUids', 'inviteEmails', 'memberInfo'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 80
+          && request.auth.uid in request.resource.data.memberUids
+          && request.resource.data.inviteEmails.size() <= 50)
+        // Any member edits their own name.
+        || (isMember()
+          && changed().hasOnly(['memberInfo'])
+          && onlyMyMemberInfoChanged()
+          && validMemberInfo(request.resource.data.memberInfo[request.auth.uid]))
+        // A member leaves.
+        || (isMember() && !isOwner()
+          && changed().hasOnly(['memberUids', 'memberInfo'])
+          && onlyMyMemberInfoChanged()
+          && resource.data.memberUids.toSet().difference(request.resource.data.memberUids.toSet()) == [request.auth.uid].toSet()
+          && request.resource.data.memberUids.toSet().difference(resource.data.memberUids.toSet()).size() == 0)
+        // An invited person joins: adds only themselves and uses up only their own invite.
+        || (isInvited()
+          && changed().hasOnly(['memberUids', 'inviteEmails', 'memberInfo'])
+          && request.resource.data.memberUids.toSet().difference(resource.data.memberUids.toSet()) == [request.auth.uid].toSet()
+          && resource.data.memberUids.toSet().difference(request.resource.data.memberUids.toSet()).size() == 0
+          && resource.data.inviteEmails.toSet().difference(request.resource.data.inviteEmails.toSet()) == [myEmail()].toSet()
+          && request.resource.data.inviteEmails.toSet().difference(resource.data.inviteEmails.toSet()).size() == 0
+          && onlyMyMemberInfoChanged()
+          && validMemberInfo(request.resource.data.memberInfo[request.auth.uid]));
+
+      allow delete: if isOwner();
+
+      function memberOfThisHousehold() {
+        return signedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/households/$(householdId)).data.memberUids;
+      }
+
+      match /assets/{id} {
+        allow read, delete: if memberOfThisHousehold();
+        allow create, update: if memberOfThisHousehold()
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 80;
+      }
+      match /tasks/{id} {
+        allow read, delete: if memberOfThisHousehold();
+        allow create, update: if memberOfThisHousehold()
+          && request.resource.data.assetId is string
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 100;
+      }
+      match /logs/{id} {
+        allow read, delete: if memberOfThisHousehold();
+        allow create: if memberOfThisHousehold()
+          && request.resource.data.by == request.auth.uid
+          && request.resource.data.date is string
+          && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+        allow update: if memberOfThisHousehold()
+          && request.resource.data.by == resource.data.by;
+      }
+    }
+  }
+}
