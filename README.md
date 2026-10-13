@@ -15,7 +15,7 @@ It's a single static page (`index.html`) backed by Supabase for sign-in and stor
 
 1. Run `supabase/schema.sql` in the Supabase SQL editor, or apply it as a migration.
 2. Put the project URL and anon key in `config.js`.
-3. In Supabase, open **Authentication → URL Configuration**. Set **Site URL** to where the page is hosted and add that URL under **Redirect URLs**.
-4. Hosting: the workflow in `.github/workflows/pages.yml` publishes to GitHub Pages on every push to `main`. In the repo, open **Settings → Pages** and set **Source** to **GitHub Actions**.
+3. Hosting on Vercel: in Vercel choose **Add New → Project**, import this GitHub repo, leave Framework Preset as **Other** with no build command, and deploy. Every push to `main` redeploys, and pull requests get preview links.
+4. In Supabase, open **Authentication → URL Configuration**. Set **Site URL** to the Vercel address (for example `https://upkeep-ledger.vercel.app`) and add it under **Redirect URLs**. To let sign-in work on preview links too, also add `https://*-<your-vercel-team>.vercel.app/**`.
 
 To run it locally, serve the folder with any static server (for example `python3 -m http.server`) and add `http://localhost:8000` to the Supabase redirect URLs.
