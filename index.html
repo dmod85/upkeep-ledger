@@ -210,7 +210,9 @@ textarea{resize:vertical;min-height:64px;width:100%}
 <div id="toast" class="toast" hidden></div>
 
 <script src="config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script>
 /* ---------- Task library ----------
    Intervals are common manufacturer and industry guidance; every one can be edited per task.
@@ -335,9 +337,9 @@ const UNIT_NAMES = { "": "No meter", mi: "Miles", km: "Kilometres", hr: "Engine 
 /* ---------- State ---------- */
 const CFG = window.UPKEEP_CONFIG || {};
 const S = {
-  sb: null, session: null, uid: null, email: "", phase: "boot",
+  fs: null, auth: null, user: null, uid: null, email: "", phase: "boot",
   household: null, role: "member", members: [], invites: [],
-  assets: new Map(), tasks: new Map(), logs: new Map(), loaded: false, channel: null,
+  assets: new Map(), tasks: new Map(), logs: new Map(), loaded: false, unsubs: [],
   view: "due", status: null, asset: "all"
 };
 try { S.asset = localStorage.getItem("ul-asset") || "all"; } catch (e) {}
@@ -390,53 +392,60 @@ function presetMeter(kindKey, meter, unit) {
   return 0;
 }
 
-/* ---------- Supabase data layer ---------- */
-const num = v => v == null ? null : Number(v);
-const fromDb = {
-  assets: r => ({ id: r.id, name: r.name, kind: r.kind, detail: r.detail || "", unit: r.unit || "", meter: num(r.meter), meterDate: r.meter_date }),
-  tasks: r => ({ id: r.id, assetId: r.asset_id, name: r.name, days: r.days, meter: num(r.meter), notes: r.notes || "" }),
-  logs: r => ({ id: r.id, taskId: r.task_id, assetId: r.asset_id, taskName: r.task_name, date: r.done_on, meter: num(r.meter), note: r.note || "", by: r.done_by, createdAt: Date.parse(r.created_at) })
-};
+/* ---------- Firebase data layer ---------- */
+const FV = () => firebase.firestore.FieldValue;
 const defined = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
-const toRow = {
-  assets: a => defined({ name: a.name, kind: a.kind, detail: a.detail, unit: a.unit, meter: a.meter, meter_date: a.meterDate }),
-  tasks: t => defined({ asset_id: t.assetId, name: t.name, days: t.days, meter: t.meter, notes: t.notes }),
-  logs: l => defined({ task_id: l.taskId, asset_id: l.assetId, task_name: l.taskName, done_on: l.date, meter: l.meter, note: l.note })
-};
-async function q(p) { const { data, error } = await p; if (error) throw error; return data; }
 const hid = () => S.household.id;
-async function load(table) {
-  const data = await q(S.sb.from(table).select("*").eq("household_id", hid()));
-  S[table] = new Map(data.map(r => { const o = fromDb[table](r); return [o.id, o]; }));
-  render();
-}
+const hhRef = () => S.fs.collection("households").doc(hid());
+const col = table => hhRef().collection(table);
+const fromDoc = d => {
+  const x = d.data({ serverTimestamps: "estimate" });
+  return { ...x, id: d.id, createdAt: x.createdAt && x.createdAt.toMillis ? x.createdAt.toMillis() : 0 };
+};
 async function ins(table, rows) {
-  const list = (Array.isArray(rows) ? rows : [rows]).map(r => ({ ...toRow[table](r), household_id: hid() }));
-  const data = await q(S.sb.from(table).insert(list).select("id"));
-  await load(table);
-  return data;
+  const list = Array.isArray(rows) ? rows : [rows];
+  const batch = S.fs.batch(); const out = [];
+  for (const r of list) {
+    const ref = col(table).doc();
+    const body = { ...defined(r), createdBy: S.uid, createdAt: FV().serverTimestamp() };
+    if (table === "logs") body.by = S.uid;
+    batch.set(ref, body); out.push({ id: ref.id });
+  }
+  await batch.commit();
+  return out;
 }
-async function upd(table, id, patch) { await q(S.sb.from(table).update(toRow[table](patch)).eq("id", id)); await load(table); }
-async function del(table, id) { await q(S.sb.from(table).delete().eq("id", id)); await load(table); }
-async function loadMembers() {
-  S.members = await q(S.sb.from("household_members").select("user_id, role, display_name, email").eq("household_id", hid()));
-  S.invites = await q(S.sb.from("household_invites").select("email, created_at").eq("household_id", hid()).order("created_at"));
-  const me = S.members.find(m => m.user_id === S.uid);
-  if (me) S.role = me.role;
-  render();
+const upd = (table, id, patch) => col(table).doc(id).update(defined(patch));
+const del = (table, id) => col(table).doc(id).delete();
+async function deleteAsset(id) {
+  const refs = [col("assets").doc(id),
+    ...[...S.tasks.values()].filter(t => t.assetId === id).map(t => col("tasks").doc(t.id)),
+    ...[...S.logs.values()].filter(l => l.assetId === id).map(l => col("logs").doc(l.id))];
+  for (let i = 0; i < refs.length; i += 450) {
+    const batch = S.fs.batch();
+    refs.slice(i, i + 450).forEach(r => batch.delete(r));
+    await batch.commit();
+  }
 }
-const reloadTimers = {};
-function scheduleLoad(table) {
-  clearTimeout(reloadTimers[table]);
-  reloadTimers[table] = setTimeout(() => (table === "household_members" ? loadMembers() : load(table)).catch(() => {}), 300);
+function stopListening() { S.unsubs.forEach(u => { try { u(); } catch (e) {} }); S.unsubs = []; }
+function listen() {
+  stopListening();
+  const ready = new Set();
+  const markReady = k => { ready.add(k); if (ready.size === 4 && !S.loaded) { S.loaded = true; afterFirstLoad(); } render(); };
+  const onErr = e => { console.error(e); if (e.code === "permission-denied") { toast("You no longer have access to this household."); leaveView(); } };
+  S.unsubs.push(hhRef().onSnapshot(d => {
+    if (!d.exists) { leaveView(); return; }
+    const h = d.data();
+    S.household = { id: d.id, ...h };
+    S.role = h.ownerUid === S.uid ? "owner" : "member";
+    const info = h.memberInfo || {};
+    S.members = (h.memberUids || []).map(uid => ({ user_id: uid, role: uid === h.ownerUid ? "owner" : "member", display_name: info[uid]?.name || "", email: info[uid]?.email || "" }));
+    S.invites = (h.inviteEmails || []).map(email => ({ email }));
+    markReady("household");
+  }, onErr));
+  for (const t of ["assets", "tasks", "logs"])
+    S.unsubs.push(col(t).onSnapshot(snap => { S[t] = new Map(snap.docs.map(d => [d.id, fromDoc(d)])); markReady(t); }, onErr));
 }
-function subscribe() {
-  if (S.channel) S.sb.removeChannel(S.channel);
-  S.channel = S.sb.channel("household-" + hid());
-  for (const t of ["assets", "tasks", "logs", "household_members"])
-    S.channel.on("postgres_changes", { event: "*", schema: "public", table: t }, () => scheduleLoad(t));
-  S.channel.subscribe();
-}
+function leaveView() { stopListening(); Object.assign(S, { household: null, assets: new Map(), tasks: new Map(), logs: new Map(), loaded: false }); findHousehold(); }
 
 /* ---------- Status ---------- */
 function logsByTask() {
@@ -500,8 +509,7 @@ async function write(fn, okMsg) {
   try { await fn(); if (okMsg) toast(okMsg); return true; }
   catch (e) {
     console.error(e);
-    if (e && (e.code === "42501" || /row-level security/i.test(e.message || ""))) toast("You don't have permission to change that.");
-    else if (e && e.code === "23505") toast("That's already on the list.");
+    if (e && e.code === "permission-denied") toast("You don't have permission to change that.");
     else toast("That didn't save. Check your connection and try again.");
     return false;
   }
@@ -542,41 +550,67 @@ function render() {
 function gateScreen() {
   if (S.phase === "boot") return h("div", { class: "empty" }, h("h2", null, "Opening the ledger"), h("p", null, "Checking whether you're signed in."));
   if (S.phase === "config") return h("div", { class: "empty" }, h("h2", null, "Almost ready"),
-    h("p", null, "This copy of the ledger isn't connected to a database yet. Add your Supabase project URL and anon key to config.js, then reload."));
+    h("p", null, "This copy of the ledger isn't connected to a database yet. Add your Firebase web app settings to config.js, then reload."));
   if (S.phase === "sent") return h("div", { class: "empty" }, h("h2", null, "Check your email"),
-    h("p", null, `We sent a sign-in link to ${S.email}. Open it on this device and you'll land back here, signed in.`),
+    h("p", null, `We sent a sign-in link to ${S.email}. Open it on this device and you'll land back here, signed in. It can take a minute, and it may land in spam.`),
     h("div", { class: "quick" }, h("button", { class: "btn", type: "button", onclick: () => { S.phase = "signin"; render(); } }, "Use a different email")));
+  if (S.phase === "confirm") {
+    const email = h("input", { type: "email", id: "f-cemail", required: true, autocomplete: "email" });
+    return h("form", { class: "empty", onsubmit: async e => { e.preventDefault(); await finishEmailLink(email.value.trim()); } },
+      h("h2", null, "Confirm your email"),
+      h("p", null, "You opened the sign-in link on a different device or browser. Enter the same email address to finish signing in."),
+      h("div", { class: "field", style: "max-width:420px" }, h("label", { for: "f-cemail" }, "Email"), email),
+      h("div", { class: "quick" }, h("button", { class: "btn primary", type: "submit" }, "Sign in")));
+  }
   if (S.phase === "setup") {
     const hname = h("input", { type: "text", id: "f-hname", maxlength: "80", placeholder: "e.g. The Modjeska house" });
     const yname = h("input", { type: "text", id: "f-yname", maxlength: "60", placeholder: "What the family calls you" });
+    yname.value = (S.user?.displayName || "").slice(0, 60);
     const go = h("button", { class: "btn primary", type: "submit" }, "Create our ledger");
     return h("form", { class: "empty", onsubmit: async e => {
       e.preventDefault();
       if (!hname.value.trim()) { hname.focus(); toast("Name your household first."); return; }
       go.disabled = true;
-      const ok = await write(() => q(S.sb.rpc("create_household", { p_name: hname.value.trim(), p_display_name: yname.value.trim() })));
-      if (ok) await loadHousehold(); else go.disabled = false;
+      const ok = await write(() => S.fs.collection("households").add({
+        name: hname.value.trim(), ownerUid: S.uid, memberUids: [S.uid], inviteEmails: [],
+        memberInfo: { [S.uid]: { name: yname.value.trim(), email: S.email } }, createdAt: FV().serverTimestamp() }));
+      if (ok) await findHousehold(); else go.disabled = false;
     } },
       h("h2", null, "Set up your household"),
-      h("p", null, `You're signed in as ${S.email}. Name the household, then invite family from the household menu. If someone already invited you, ask them to check the email they used.`),
+      h("p", null, `You're signed in as ${S.email}. Name the household, then invite family from the household menu. If someone already invited you, check that you signed in with the email they used.`),
       h("div", { class: "fields" }, h("div", { class: "field" }, h("label", { for: "f-hname" }, "Household name"), hname), h("div", { class: "field" }, h("label", { for: "f-yname" }, "Your name"), yname)),
       h("div", { class: "quick" }, go, h("button", { class: "btn ghost", type: "button", onclick: signOut }, "Sign out")));
   }
   const email = h("input", { type: "email", id: "f-email", required: true, autocomplete: "email", placeholder: "you@example.com" });
   email.value = S.email || "";
-  const go = h("button", { class: "btn primary", type: "submit" }, "Email me a sign-in link");
+  const go = h("button", { class: "btn", type: "submit" }, "Email me a sign-in link");
+  const google = h("button", { class: "btn primary", type: "button", onclick: async () => {
+    google.disabled = true;
+    try { await S.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
+    catch (e) {
+      google.disabled = false;
+      if (e.code === "auth/popup-blocked" || e.code === "auth/operation-not-supported-in-this-environment") await S.auth.signInWithRedirect(new firebase.auth.GoogleAuthProvider());
+      else if (e.code !== "auth/popup-closed-by-user" && e.code !== "auth/cancelled-popup-request") toast("Google sign-in didn't work. Try the email link instead.");
+    }
+  } }, "Continue with Google");
   return h("form", { class: "empty", onsubmit: async e => {
     e.preventDefault();
     const addr = email.value.trim().toLowerCase();
     if (!addr) { email.focus(); return; }
     go.disabled = true;
-    const { error } = await S.sb.auth.signInWithOtp({ email: addr, options: { emailRedirectTo: location.origin + location.pathname } });
-    if (error) { go.disabled = false; toast(/rate/i.test(error.message) ? "Too many tries. Wait a minute and try again." : "We couldn't send the link. Check the address and try again."); return; }
-    S.email = addr; S.phase = "sent"; render();
+    try {
+      await S.auth.sendSignInLinkToEmail(addr, { url: location.origin + location.pathname, handleCodeInApp: true });
+      try { localStorage.setItem("ul-email", addr); } catch (err) {}
+      S.email = addr; S.phase = "sent"; render();
+    } catch (err) {
+      console.error(err); go.disabled = false;
+      toast(err.code === "auth/quota-exceeded" ? "Too many sign-in emails today. Use Google, or try again tomorrow." : "We couldn't send the link. Check the address and try again.");
+    }
   } },
     h("h2", null, "Sign in"),
-    h("p", null, "Enter your email and we'll send you a link. No password needed. Family members need an invite from whoever set up the household."),
-    h("div", { class: "field", style: "max-width:420px" }, h("label", { for: "f-email" }, "Email"), email),
+    h("p", null, "Use your Google account, or get a sign-in link by email. No password needed. Family members need an invite from whoever set up the household."),
+    h("div", { class: "quick" }, google),
+    h("div", { class: "field", style: "max-width:420px" }, h("label", { for: "f-email" }, "Or sign in with email"), email),
     h("div", { class: "quick" }, go));
 }
 
@@ -750,7 +784,7 @@ function openThing(assetId, kindKey) {
   });
   const foot = [];
   if (a) foot.push(confirmBtn("Delete", async () => {
-    const ok = await write(async () => { await del("assets", a.id); await Promise.all([load("tasks"), load("logs")]); }, `${a.name} deleted`);
+    const ok = await write(() => deleteAsset(a.id), `${a.name} deleted`);
     if (ok) closeSheet();
   }), h("span", { style: "flex:1" }));
   foot.push(h("button", { class: "btn", type: "button", onclick: closeSheet }, "Cancel"), save);
@@ -875,32 +909,33 @@ function openHousehold() {
   const saveName = h("button", { class: "btn small", type: "button" }, "Save name");
   saveName.addEventListener("click", async () => {
     saveName.disabled = true;
-    await write(async () => { await q(S.sb.from("household_members").update({ display_name: myName.value.trim() || null }).eq("household_id", hid()).eq("user_id", S.uid)); await loadMembers(); }, "Name saved");
+    await write(() => hhRef().update({ [`memberInfo.${S.uid}`]: { name: myName.value.trim().slice(0, 60), email: S.email } }), "Name saved");
     saveName.disabled = false;
   });
   const people = h("div", { class: "hist" }, S.members.map(m => h("div", { class: "hrow member" },
     h("div", { style: "min-width:0" }, h("div", { class: "r-title" }, m.user_id === S.uid ? `${m.display_name || "You"} (you)` : (m.display_name || "No name yet")), h("div", { class: "r-asset" }, m.email || "")),
     h("span", { class: "kind" }, m.role === "owner" ? "Owner" : "Family"),
-    owner && m.user_id !== S.uid ? confirmBtn("Remove", async b => { if (await write(async () => { await q(S.sb.from("household_members").delete().eq("household_id", hid()).eq("user_id", m.user_id)); await loadMembers(); }, "Removed")) b.closest(".hrow")?.remove(); }) : h("span"))));
+    owner && m.user_id !== S.uid ? confirmBtn("Remove", async b => { if (await write(() => hhRef().update({ memberUids: FV().arrayRemove(m.user_id), [`memberInfo.${m.user_id}`]: FV().delete() }), "Removed")) b.closest(".hrow")?.remove(); }) : h("span"))));
   const pending = S.invites.length ? h("div", { class: "hist" }, S.invites.map(i => h("div", { class: "hrow member" },
     h("div", { style: "min-width:0" }, h("div", { class: "r-title" }, i.email), h("div", { class: "r-asset" }, "Invited, hasn't signed in yet")),
     h("span"),
-    owner ? confirmBtn("Cancel", async b => { if (await write(async () => { await q(S.sb.from("household_invites").delete().eq("household_id", hid()).eq("email", i.email)); await loadMembers(); }, "Invite cancelled")) b.closest(".hrow")?.remove(); }) : h("span")))) : null;
+    owner ? confirmBtn("Cancel", async b => { if (await write(() => hhRef().update({ inviteEmails: FV().arrayRemove(i.email) }), "Invite cancelled")) b.closest(".hrow")?.remove(); }) : h("span")))) : null;
   const invite = h("input", { type: "email", placeholder: "family@example.com", autocomplete: "off" });
   const sendInvite = h("button", { class: "btn small primary", type: "button" }, "Invite");
   sendInvite.addEventListener("click", async () => {
     const e = invite.value.trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { invite.focus(); toast("Enter a full email address."); return; }
+    if (S.members.some(m => m.email === e)) { toast("They're already in the household."); return; }
     sendInvite.disabled = true;
-    const ok = await write(async () => { await q(S.sb.from("household_invites").insert({ household_id: hid(), email: e })); await loadMembers(); }, "Invited");
+    const ok = await write(() => hhRef().update({ inviteEmails: FV().arrayUnion(e) }), "Invited");
     sendInvite.disabled = false;
-    if (ok) openHousehold();
+    if (ok) setTimeout(openHousehold, 50);
   });
   openSheet(S.household.name, `Signed in as ${S.email}`,
     [h("div", { class: "field" }, h("label", { for: "f-myname" }, "Your name"), h("div", { class: "inline" }, Object.assign(myName, { id: "f-myname" }), saveName)),
      h("h3", { class: "sec-title" }, `Family (${S.members.length})`), people,
      owner ? [h("div", { class: "field" }, h("label", { for: "f-invite" }, "Invite someone"), h("div", { class: "inline" }, Object.assign(invite, { id: "f-invite" }), sendInvite),
-       h("p", { class: "hint" }, "Tell them to open the ledger and sign in with that email. They'll join automatically. The app doesn't send the invite for you.")),
+       h("p", { class: "hint" }, `Then send them ${location.origin} and tell them to sign in with that email, or with Google if it's a Gmail address. They'll join automatically. The app doesn't send the invite for you.`)),
        pending ? [h("h3", { class: "sec-title" }, "Waiting to join"), pending] : null] : h("p", { class: "hint" }, "Only the household owner can invite or remove people.")],
     [h("button", { class: "btn", type: "button", onclick: signOut }, "Sign out"), h("span", { style: "flex:1" }), h("button", { class: "btn primary", type: "button", onclick: closeSheet }, "Done")]);
 }
@@ -917,43 +952,69 @@ $("#householdBtn").addEventListener("click", openHousehold);
 /* ---------- Session ---------- */
 async function signOut() {
   closeSheet();
-  if (S.channel) { S.sb.removeChannel(S.channel); S.channel = null; }
-  await S.sb.auth.signOut();
+  stopListening();
+  await S.auth.signOut();
 }
 function resetData() {
-  Object.assign(S, { session: null, uid: null, household: null, role: "member", members: [], invites: [], assets: new Map(), tasks: new Map(), logs: new Map(), loaded: false });
+  stopListening();
+  Object.assign(S, { user: null, uid: null, household: null, role: "member", members: [], invites: [], assets: new Map(), tasks: new Map(), logs: new Map(), loaded: false });
 }
-let startingFor = null;
-async function startSession(session) {
-  if (startingFor === session.user.id || (S.uid === session.user.id && S.phase === "app")) return;
-  startingFor = session.user.id;
-  S.session = session; S.uid = session.user.id; S.email = session.user.email || "";
-  try { await q(S.sb.rpc("claim_invites")); } catch (e) { console.warn("claim_invites", e); }
-  await loadHousehold();
-  startingFor = null;
+async function startSession(user) {
+  S.user = user; S.uid = user.uid; S.email = (user.email || "").toLowerCase();
+  if (user.emailVerified && S.email) {
+    try {
+      const invited = await S.fs.collection("households").where("inviteEmails", "array-contains", S.email).get();
+      for (const d of invited.docs) {
+        await d.ref.update({
+          memberUids: FV().arrayUnion(S.uid), inviteEmails: FV().arrayRemove(S.email),
+          [`memberInfo.${S.uid}`]: { name: (user.displayName || "").slice(0, 60), email: S.email } });
+      }
+    } catch (e) { console.warn("joining invited household failed", e); }
+  }
+  await findHousehold();
 }
-async function loadHousehold() {
+async function findHousehold() {
   try {
-    const mem = await q(S.sb.from("household_members").select("role, households(id, name)").eq("user_id", S.uid).order("joined_at").limit(1));
-    if (!mem.length || !mem[0].households) { S.phase = "setup"; render(); return; }
-    S.household = mem[0].households; S.role = mem[0].role; S.phase = "app"; S.loaded = false;
+    const snap = await S.fs.collection("households").where("memberUids", "array-contains", S.uid).get();
+    if (snap.empty) { S.phase = "setup"; render(); return; }
+    const d = snap.docs.sort((a, b) => (a.data().ownerUid === S.uid ? -1 : 0) - (b.data().ownerUid === S.uid ? -1 : 0))[0];
+    S.household = { id: d.id, ...d.data() }; S.phase = "app"; S.loaded = false;
     render();
-    await Promise.all([loadMembers(), load("assets"), load("tasks"), load("logs")]);
-    S.loaded = true; subscribe(); render();
-    const me = S.members.find(m => m.user_id === S.uid);
-    if (me && !me.display_name) { toast("Add your name so the family knows who logged what."); openHousehold(); }
+    listen();
   } catch (e) {
     console.error(e); toast("The ledger didn't load. Check your connection and reload.");
   }
 }
+function afterFirstLoad() {
+  const me = S.members.find(m => m.user_id === S.uid);
+  if (me && !me.display_name) { toast("Add your name so the family knows who logged what."); openHousehold(); }
+}
+async function finishEmailLink(email) {
+  try {
+    await S.auth.signInWithEmailLink(email, location.href);
+    try { localStorage.removeItem("ul-email"); } catch (e) {}
+    history.replaceState(null, "", location.pathname + location.hash);
+  } catch (e) {
+    console.error(e); S.phase = "signin"; render();
+    toast(e.code === "auth/invalid-action-code" || e.code === "auth/expired-action-code" ? "That sign-in link has expired or was already used. Send a new one." : "Sign-in didn't work. Send a new link and try again.");
+  }
+}
 (async () => {
   render();
-  if (!CFG.supabaseUrl || !CFG.supabaseAnonKey || !window.supabase) { S.phase = "config"; render(); return; }
-  S.sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
-  S.sb.auth.onAuthStateChange((event, session) => {
-    if (event === "SIGNED_OUT") { resetData(); S.phase = "signin"; render(); return; }
-    if (session && (event === "SIGNED_IN" || event === "INITIAL_SESSION")) setTimeout(() => startSession(session), 0);
-    else if (event === "INITIAL_SESSION") { S.phase = "signin"; render(); }
+  const fb = CFG.firebase;
+  if (!fb || !fb.apiKey || !window.firebase) { S.phase = "config"; render(); return; }
+  firebase.initializeApp(fb);
+  S.auth = firebase.auth();
+  S.fs = firebase.firestore();
+  if (CFG.useEmulators) { S.auth.useEmulator("http://127.0.0.1:9099"); S.fs.useEmulator("127.0.0.1", 8080); }
+  try { await S.fs.enablePersistence({ synchronizeTabs: true }); } catch (e) {}
+  if (S.auth.isSignInWithEmailLink(location.href)) {
+    let saved = ""; try { saved = localStorage.getItem("ul-email") || ""; } catch (e) {}
+    if (saved) await finishEmailLink(saved); else { S.phase = "confirm"; render(); }
+  }
+  S.auth.onAuthStateChanged(user => {
+    if (user) { if (user.uid !== S.uid) startSession(user); }
+    else { resetData(); if (S.phase !== "confirm") { S.phase = "signin"; render(); } }
   });
 })();
 </script>

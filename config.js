@@ -1,6 +1,10 @@
-// Public Supabase settings for this ledger. The anon key is safe to publish:
-// row level security in supabase/schema.sql decides who can read or change data.
+// Firebase web app settings for this ledger (Firebase console → Project settings → Your apps).
+// These values are meant to be public: firestore.rules decides who can read or change data.
 window.UPKEEP_CONFIG = {
-  supabaseUrl: "",
-  supabaseAnonKey: ""
+  firebase: {
+    apiKey: "",
+    authDomain: "",
+    projectId: "",
+    appId: ""
+  }
 };

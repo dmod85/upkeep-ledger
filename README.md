@@ -2,20 +2,25 @@
 
 A shared maintenance log for the family: oil changes, furnace filters, generator service, smoke alarm tests and about 100 other routine tasks for the home, vehicles and equipment. It shows what's overdue, what's coming up, and who did each job last.
 
-It's a single static page (`index.html`) backed by Supabase for sign-in and storage.
+It's a single static page (`index.html`) hosted on Vercel, with Firebase (free Spark plan) for sign-in and storage.
 
 ## How it works
 
-- **Sign-in** uses Supabase email links. Nobody needs a password.
-- **Households:** the first person to sign in creates the household and becomes its owner. The owner invites family by email from the Household menu. When an invited person signs in with that email, they join automatically.
-- **Privacy:** row level security in `supabase/schema.sql` limits every table to members of the household. The anon key in `config.js` is public by design.
-- **Live updates:** Supabase Realtime refreshes the page when someone else logs something.
+- **Sign-in** uses Google or an emailed sign-in link. Nobody needs a password.
+- **Households:** the first person to sign in creates the household and becomes its owner. The owner invites family by email from the household menu. When an invited person signs in with that email, they join automatically.
+- **Privacy:** `firestore.rules` limits every record to members of its household. The Firebase settings in `config.js` are public by design.
+- **Live updates:** Firestore pushes changes to every open page as soon as someone logs something.
 
 ## Setup
 
-1. Run `supabase/schema.sql` in the Supabase SQL editor, or apply it as a migration.
-2. Put the project URL and anon key in `config.js`.
-3. Hosting on Vercel: in Vercel choose **Add New → Project**, import this GitHub repo, leave Framework Preset as **Other** with no build command, and deploy. Every push to `main` redeploys, and pull requests get preview links.
-4. In Supabase, open **Authentication → URL Configuration**. Set **Site URL** to the Vercel address (for example `https://upkeep-ledger.vercel.app`) and add it under **Redirect URLs**. To let sign-in work on preview links too, also add `https://*-<your-vercel-team>.vercel.app/**`.
+1. In the [Firebase console](https://console.firebase.google.com), create a project. Google Analytics is not needed.
+2. **Build → Authentication → Get started.** Under Sign-in method, enable **Google**. Also enable **Email/Password** and turn on **Email link (passwordless sign-in)**. Under Settings → Authorized domains, add `upkeep-ledger.vercel.app`.
+3. **Build → Firestore Database → Create database.** Pick a location near you and start in production mode. On the **Rules** tab, paste the contents of `firestore.rules` and click Publish.
+4. **Project settings → Your apps → Web (</>)**: register an app and copy `apiKey`, `authDomain`, `projectId` and `appId` into `config.js`.
+5. Vercel redeploys on every push to `main`.
 
-To run it locally, serve the folder with any static server (for example `python3 -m http.server`) and add `http://localhost:8000` to the Supabase redirect URLs.
+To run it locally, serve the folder with any static server, for example `python3 -m http.server`. `localhost` is an authorized domain by default.
+
+## Free plan limits
+
+The Spark plan allows 50,000 reads, 20,000 writes and 1 GiB of storage per day, far more than a family uses. Email-link sign-in is limited to a handful of emails a day on the free plan, so prefer Google sign-in for anyone with a Gmail address.
